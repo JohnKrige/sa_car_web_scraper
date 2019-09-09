@@ -4,6 +4,8 @@ import pickle
 import time
 import os
 import csv
+import pandas as pd
+import numpy as np
 
 
 # set the time in seconds that the program stops for if the host kicks us from scraping
