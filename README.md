@@ -1,2 +1,9 @@
 # sa_car_web_scraper
-Scrapes second hand car sales data - to be used for a ml project
+This is the final version that  will use for the project
+
+## Libraries used: 
+*os
+*time
+*requests
+*pickle
+*BeautifulSoup
