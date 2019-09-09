@@ -1,20 +1,17 @@
 import pandas as pd 
 import numpy as np 
-import matplotlib.pyplot as plt 
-import seaborn as sns 
 from bs4 import BeautifulSoup as bs
 import requests
 import pickle
 import time
+import os
+import csv
 
 
+# set the time in seconds that the program stops for if the host kicks us from scraping
+time = 10
 
-# Scraping the prices of used cars from cars.co.za
-#I will be using popular brands only
-
-# car_df = pd.DataFrame()
-
-# To get the URLS for the popular brands to search
+# This provides a list of the promonent car brands on the website
 def get_popular_brands():
 	url = "https://www.cars.co.za/"
 	req = requests.get("https://www.cars.co.za/")
@@ -24,158 +21,161 @@ def get_popular_brands():
 	car_links = []
 	for i in car_table:
 		car_links.append(i["href"])
-	pickle_on = open("popular_cars","wb")
+		print(i["href"])
+	pickle_on = open("popular_brands","wb")
 	pickle.dump(car_links,pickle_on)
 	pickle_on.close()
-	
 
-# Returns a binary file with all the links to individual entries
-def get_all_car_urls(popular_brands = False):
+# get_popular_brands()
+
+# Scrapes the data and writes it to a csv file:
+# Step 1) Open popular brands
+# Step 2) For each page listed per brand
+#			- scrape all urls on page
+# 			- If urls not in binary file (new urls):
+#				- store urls in a file (binary file)
+# 				- scrape data for each new url (enter url and scrape)
+#				- write scraped data to brand csv
+
+def scrape_data(popular_brands=False,car_urls_file=False):
 	if popular_brands:
-		car_links = get_popular_brands()
+		brand_urls = get_popular_brands()
 	else:
-		open_pickle = open("popular_cars","rb")
-		car_links = pickle.load(open_pickle)
-	combined_array = []
-	for link in car_links: 
-		# link  = car_links[0]
-		page_url = "https://www.cars.co.za{}".format(link)
-		# print(url)
+		open_popular_brands_pickle = open("popular_brands","rb")
+		brand_urls = pickle.load(open_popular_brands_pickle)
+	
+	for car_brand in brand_urls:
+		page_url = "https://www.cars.co.za{}".format(car_brand)
+
 		page_request = requests.get(page_url)
 		page_soup = bs(page_request.text,"html.parser")
 		page_soup.prettify()
 		page_find = page_soup.find(class_="resultsnum pagination__page-number pagination__page-number_right").text
+		
+		# Finding the total number of pages listed per brand
 		total_pages = int(page_find.split("\n")[-1].strip(" "))
-		cars = []
-		failed_pages = []
-		# for page in range(1,10):
+		
+		# Drilling down into each page.
 		for page in range(1,total_pages+1):
+
+			# A try block is added incase the host kicks us. If kicked this fails and the program sleeps for a few seconds and then it continues with the next page. 
+
 			try: 
-				# print(link + ":  "+ str(page)+"/" + str(total_pages))
-				url = "https://www.cars.co.za{}?P={}".format(link,page)
-				print(url)
-				request = requests.get(url)
+				url_car = "https://www.cars.co.za{}?P={}".format(car_brand,page)
+				request = requests.get(url_car)
 				soup = bs(request.text,"html.parser")
 				soup.prettify()
 				cars_on_page = soup.find_all(class_ = "vehicle-list__vehicle-name")
-				for i in cars_on_page:
-					cars.append(i["href"])
-				if page % 100 == 0:
-				 	time.sleep(3)
-				 	print("sleeping, another 100 pages scraped")
-				                        
-			except:
-				time.sleep(10)
-				try:
-					url = "https://www.cars.co.za{}?P={}".format(link,page)
-					print("except block 1")
-					# print(url)
-					request = requests.get(url)
-					soup = bs(request.text,"html.parser")
-					soup.prettify()
-					cars_on_page = soup.find_all(class_ = "vehicle-list__vehicle-name")
-					for i in cars_on_page:
-						cars.append(i["href"])
-				except:
-					print("ultimate FAIL")
-					failed_pages.append(url)
-					time.sleep(5)
+
+				for car in cars_on_page:
+
+					# another try/except block used incase a we get kicked from the site. Program will sleep for time set at top of page. 
+					try: 
+
+						# open a file with all urls, if a url already exists, we skip the scraping of the url: 
+						if os.path.exists("car_urls"):
+							with open("car_urls","rb") as f:
+								car_urls = pickle.load(f)
+
+						else:
+							car_urls = []
+
+						
+						car = car["href"]
+						# Getting the individual car details per car per page
+						url = "https://www.cars.co.za{}".format(car)
+						print(url)
+
+						if url in car_urls:
+							print("already scraped")
+
+						else:
+
+							request = requests.get(url)
+							soup = bs(request.text,"html.parser")
+							soup.prettify()
+
+							# This table contains most the the details for each car.
+							table = soup.find(class_="table table-bordered table-bold-col vehicle-details vehicle-view__section").find_all("td")
+
+							# The table is an array of type of detail and then the detail e.g. Fuel Type: Petrol
+							# I go down the list and grab 2 items at a time and write it to a dictionary. e.g. Fuel Type: Petrol
+							car_details = {}
+							incrimenter = 0
+							while incrimenter < len(table) -1:
+								feature_list = table[incrimenter:len(table)]
+								car_details[feature_list[0].text] = feature_list[1].text
+								incrimenter += 2
+
+							# Add the brand to the car_details dictionary
+							car_details["Brand"] = car_brand.split("/")[2]
+
+							# Add the price to the car_details dictionary
+							raw_price = soup.find(class_="price price_view vehicle-view__price").get_text()
+							price = int("".join([(s) for s in raw_price.split() if s.isdigit()]))
+							car_details["Price"] = int(price)
+
+							# Each car page has 2 places where the car model is stated with some added indo. I want to get both and see if one is easier to clean than the other. 
+
+							# Adding model name 1 to the car_details dictionary (name option 1)
+							car_name1 = soup.find(class_="heading heading_size_xl").text
+							car_details["Model_1"] = car_name1
+
+							# Adding model name 2 to the car_details dictionary (name option 2) - This section is not alway available hence the try block
+							try:
+								car_name2 = soup.find(class_="heading heading_size_ml vehicle-view__description-heading vehicle-specs__heading").text
+								car_details["Model_2"] = car_name2
+							except:
+								car_details["Model_2"] = "Unknown"
+
+							try: 
+								car_table2 = soup.find(class_="vehicle-specs__table vehicle-specs__table--bold-col")
+								car_table2 = car_table2.find_all("td")
+								incrimenter_t2 = 0
+								while incrimenter_t2 < len(car_table2)-1:
+									features = car_table2[incrimenter_t2:len(car_table2)]
+									car_details[features[0].text+ "2"] = features[1].text
+									incrimenter_t2 += 2
+
+							except:
+								car_detals2 = {'Engine2': 'Unknown', 'Doors2': 'Unknown', 'Transmission2': 'Unknown', 'Fuel Consumption (Average)2': 'Unknown', 'Date introduced2': 'Unknown'}
+								car_details = {**car_details,**car_detals2}
+
+							if os.path.exists("car_details.csv"): 	
+								with open('car_details.csv', 'a') as f:  
+									headers = car_details.keys()
+									w = csv.DictWriter(f,fieldnames = headers)
+									w.writerow(car_details)
+
+							else:
+								with open('car_details.csv', 'a') as f:  
+									headers = car_details.keys()
+									w = csv.DictWriter(f, fieldnames = headers)
+									w.writeheader()
+									w.writerow(car_details)
 
 
-		combined_array.append([link,cars])	
-
-		brand_name = link.split("/")[2]
-
-
-		#Write the current brand to binary - incase process is cut off to avoid massive inefficiency
-		pickle_now = open("car_data/pickle_{}".format(brand_name),"wb")
-		pickle.dump([combined_array],pickle_now)
-		pickle_now.close()
-		time.sleep(10)
-
-		#Write failed pages to binary
-		pickle_fail = open("car_data/failed_pages_{}".format(brand_name),"wb")
-		pickle.dump([failed_pages],pickle_fail)
-		pickle_fail.close()
-
-	pickle_on = open("all_cars","wb")
-	pickle.dump([combined_array],pickle_on)
-	pickle_on.close()
+							# add the url to the scraped urls file if all went well
+							car_urls.append(url)
 
 
-def creating_the_data(all_car_urls = False):
-	if all_car_urls: 
-		get_all_car_urls()
-	else:
-		pass
+							with open("car_urls","wb") as f:
+								pickle.dump(car_urls,f)
 
-	open_pickle = open("all_cars","rb")
-	all_car_urls = pickle.load(open_pickle)
-	for i in range(5,len(all_car_urls[0])):
-	# for i in range(2,3):
-		car_df = pd.DataFrame()
-		number_pages = 0
-		failed_scrape = []
-		for link in all_car_urls[0][i][1]:	
-			failed_scrape = []
-			try:
-				number_pages += 1
-				print("Scraping page: {}.....{}".format(number_pages,link))
-				car_url = link
-				url = "https://www.cars.co.za{}".format(car_url)
-				request = requests.get(url)
-				soup = bs(request.text,"html.parser")
-				soup.prettify()
+					except:
+						print("Kicked, sleep for {} seconds".format(time))
+						time.sleep(time)
 
-				#Getting the details
-				table = soup.find(class_="table table-bordered table-bold-col vehicle-details vehicle-view__section").find_all("td")
-				car_details = {}
-				incrimenter = 0
-				while incrimenter < len(table) -1:
-					feature_list = table[incrimenter:len(table)]
-					car_details[feature_list[0].text] = [feature_list[1].text]
-					incrimenter += 2
-
-				car_details["Brand"] = all_car_urls[0][i][0].split("/")[2]
-				Brand = all_car_urls[0][i][0].split("/")[2]
-
-				#Getting the price	
-				raw_price = soup.find(class_="price price_view vehicle-view__price").get_text()
-				price = int("".join([(s) for s in raw_price.split() if s.isdigit()]))
-				car_details["Price"] = [price]
-
-				#Getting the car name
-				car_name = soup.find(class_="heading heading_size_xl").text
-				car_details["Model"] = [car_name]
-
-
-				df_car_search = pd.DataFrame.from_dict(car_details)
-
-				if car_df.empty:
-					car_df = df_car_search
-				else:
-					car_df = pd.concat([car_df,df_car_search],sort=True)
-
-				if number_pages % 50 == 0:
-					print("sleeping")
-					print("Another 50 cars scraped")
-					time.sleep(3)
 
 			except:
-				print("Exception, fail alert")
-				time.sleep(10)
-				failed_scrape.append(link)
-
-		car_df.to_csv("car_data/car_csv/{}_data.csv".format(car_details["Brand"]))
-
-		pickle_failed = open("car_data/car_csv/failed_{}_car_scrapes".format(Brand),"wb")
-		pickle.dump(failed_scrape,pickle_failed)
-		pickle_failed.close()
-
-		time.sleep(10)
+				print("Kicked, sleep for {} seconds".format(time))
+				time.sleep(time)		
 
 
-creating_the_data()
+
+scrape_data()
+
+
 
 
 
