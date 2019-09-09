@@ -3,7 +3,7 @@ Scrapes second hand car sales data - to be used for a ml project.
 The much imporved branch is the final branch that I will use for the project. 
 
 
-#2 Libraries used:
+## Libraries used:
 * os
 * requests
 * Beautiful Soup
