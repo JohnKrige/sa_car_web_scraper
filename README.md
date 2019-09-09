@@ -2,8 +2,8 @@
 This is the final version that  will use for the project
 
 ## Libraries used: 
-*os
-*time
-*requests
-*pickle
-*BeautifulSoup
+* os
+* time
+* requests
+* pickle
+* BeautifulSoup
